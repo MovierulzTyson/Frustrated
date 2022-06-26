@@ -12,6 +12,14 @@ from bot.helper.telegram_helper.bot_commands import BotCommands
 from bot import download_dict, download_dict_lock, STATUS_LIMIT, botStartTime, DOWNLOAD_DIR
 from bot.helper.telegram_helper.button_build import ButtonMaker
 
+import shutil
+import psutil
+from telegram.error import RetryAfter
+from telegram.ext import CallbackQueryHandler
+from telegram.message import Message
+from telegram.update import Update
+from bot import *
+
 MAGNET_REGEX = r"magnet:\?xt=urn:btih:[a-zA-Z0-9]*"
 
 URL_REGEX = r"(?:(?:https?|ftp):\/\/)?[\w/\-?=%.]+\.[\w/\-?=%.]+"
@@ -178,14 +186,18 @@ def get_readable_message():
                 elif 'MB/s' in spd:
                     upspeed_bytes += float(spd.split('M')[0]) * 1048576
         bmsg += f"\n<b>DL:</b> {get_readable_file_size(dlspeed_bytes)}/s | <b>UL:</b> {get_readable_file_size(upspeed_bytes)}/s"
+        buttons = ButtonMaker()
+        buttons.sbutton("stats", str(THREE))
         if STATUS_LIMIT is not None and tasks > STATUS_LIMIT:
             msg += f"<b>Page:</b> {PAGE_NO}/{pages} | <b>Tasks:</b> {tasks}\n"
             buttons = ButtonMaker()
-            buttons.sbutton("Previous", "status pre")
-            buttons.sbutton("Next", "status nex")
-            button = InlineKeyboardMarkup(buttons.build_menu(2))
+            buttons.sbutton("previous", "status pre")
+            buttons.sbutton("Refresh", str(ONE))
+            buttons.sbutton("next", "status nex")
+            buttons.sbutton("stats", str(THREE))
+            button = InlineKeyboardMarkup(buttons.build_menu(3))
             return msg + bmsg, button
-        return msg + bmsg, ""
+        return msg + bmsg, sbutton
 
 def turn(data):
     try:
@@ -279,3 +291,46 @@ def get_content_type(link: str) -> str:
             content_type = None
     return content_type
 
+ONE, TWO, THREE = range(3)
+
+def refresh(update, context):
+    query = update.callback_query
+    query.edit_message_text(text="Refreshing Status...⏳")
+    sleep(2)
+    update_all_messages()
+
+def pop_up_stats(update, context):
+    query = update.callback_query
+    stats = bot_sys_stats()
+    query.answer(text=stats, show_alert=True)
+
+def bot_sys_stats():
+    currentTime = get_readable_time(time() - botStartTime)
+    cpu = psutil.cpu_percent()
+    mem = psutil.virtual_memory().percent
+    disk = psutil.disk_usage(DOWNLOAD_DIR).percent
+    total, used, free = shutil.disk_usage(DOWNLOAD_DIR)
+    total = get_readable_file_size(total)
+    used = get_readable_file_size(used)
+    free = get_readable_file_size(free)
+    recv = get_readable_file_size(psutil.net_io_counters().bytes_recv)
+    sent = get_readable_file_size(psutil.net_io_counters().bytes_sent)
+    stats = f"""
+BOT UPTIME 🕐 : {currentTime}
+
+CPU :  {cpu}%
+RAM :  {mem}%
+
+DISK : {disk}%
+TOTAL : {total}
+
+USED : {used} || FREE : {free}
+SENT : {sent} || RECV : {recv}
+"""
+    return stats
+
+
+dispatcher.add_handler(CallbackQueryHandler(refresh, pattern="^" + str(ONE) + "$"))
+dispatcher.add_handler(
+    CallbackQueryHandler(pop_up_stats, pattern="^" + str(THREE) + "$")
+)
